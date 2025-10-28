@@ -38,6 +38,34 @@ def normalize_rows(mat, eps=1e-10):
     return mat / (norms + eps)
 
 
+def kmeans_plus_plus_init(X: np.ndarray, k: int) -> np.ndarray:
+    """
+    Construct initial cluster centroids using k-means++ algorithm for cosine similarity clustering with embedded vectors.
+
+    Parameters:
+        X (np.ndarray): The input data points (embedded vectors).
+        k (int): The number of clusters.
+    Returns:
+        np.ndarray: The initial cluster centroids.
+    """
+    n_samples, n_features = X.shape
+
+    Xw = X.astype(np.float64, copy=True)
+    norms = np.linalg.norm(Xw, axis=1, keepdims=True)
+    Xw = Xw / (norms + 1e-10)
+
+    first = np.random.randint(0, n_samples)
+    centroids = [Xw[first]]
+
+    for _ in range(1, k):
+        dists = np.array([min(np.dot(x, c) for c in centroids) for x in Xw])
+        probs = dists / dists.sum()
+        next_centroid = np.random.choice(n_samples, p=probs)
+        centroids.append(Xw[next_centroid])
+
+    return np.array(centroids)
+
+
 def create_cluster(embed_list, num_clusters=10):
     """
     Create clusters from embedded
