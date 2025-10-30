@@ -127,6 +127,9 @@ def setup_clusters(centroids, embeds, clusters):
     Returns:
 
     """
+    centroids_list = centroids
+    centroids = centroids_list[-1]
+    print("centroids", centroids.shape, centroids)
     arr_norm = normalize_rows(embeds)
     sims = arr_norm @ centroids.T  # cosine similarity
     # max_sim_indices = np.argmax(sims, axis=1)
@@ -136,7 +139,15 @@ def setup_clusters(centroids, embeds, clusters):
     item, group = np.where(mask)
     for idx, num in enumerate(group):
         clusters[num].append(int(item[idx]))
-    return sims, clusters
+
+    new_centers = [np.mean(arr_norm[grp], axis=0) for grp in clusters]
+    centroids_list.append(new_centers)
+    last_two = centroids_list[-2:]
+    threshold = 1e-4
+    if np.linalg.norm(last_two[0] - last_two[1]) < threshold:
+        return sims, clusters
+    else:
+        return setup_clusters(centroids_list, arr_norm, clusters)
 
 
 def create_cluster(embed_list, num_clusters=10):
@@ -162,6 +173,7 @@ def create_cluster(embed_list, num_clusters=10):
     centroids_idx, centroids = kmeans_plus_plus_init(
         arr, num_clusters, random_state=42, return_indices=True
     )
+    centroids = [centroids]
     average_cent_dist_change = np.inf
     groups = [[] for _ in range(num_clusters)]
     min_dist = 1e-6
