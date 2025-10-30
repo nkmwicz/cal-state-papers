@@ -1,7 +1,10 @@
+import random
 import numpy as np
 from openai import OpenAI
 import os
 import dotenv
+import umap
+from sklearn.cluster import SpectralClustering
 
 dotenv.load_dotenv()
 
@@ -23,6 +26,27 @@ def embed_items(texts):
     response = client.embeddings.create(input=texts, model="text-embedding-3-small")
 
     return [data.embedding for data in response.data]
+
+
+def reduce_dimensions(embeddings, n_components=50, random_state=42):
+    """
+    Reduce the dimensionality of embeddings using UMAP
+    Parameters:
+        embeddings (list): The list of embedded vectors.
+        n_components (int): The number of dimensions to reduce to.
+
+    Returns:
+        reduced_embeddings (np.ndarray): The reduced dimensionality embeddings.
+    """
+    reducer = umap.UMAP(
+        n_components=n_components,
+        random_state=random_state,
+        metric="cosine",
+        min_dist=0.1,
+        n_neighbors=15,
+    )
+    X_reducer = reducer.fit_transform(embeddings)
+    return X_reducer
 
 
 def normalize_rows(mat, eps=1e-10):
@@ -92,6 +116,27 @@ def kmeans_plus_plus_init(
 
 
 # def assign_similarities()
+def setup_clusters(centroids, embeds, clusters):
+    """
+    Sets embeds into clusters based on cosine similarity to centroids.
+
+    Parameters:
+        centroids (np.ndarray): The cluster centroids.
+        embeds (np.ndarray): The embedded vectors.
+        clusters (list[list]): The list of clusters to populate. A list for each cluster.
+    Returns:
+
+    """
+    arr_norm = normalize_rows(embeds)
+    sims = arr_norm @ centroids.T  # cosine similarity
+    # max_sim_indices = np.argmax(sims, axis=1)
+    max_sim = np.max(sims, axis=1).reshape(-1, 1)
+    margin = 0.10
+    mask = sims >= (max_sim - margin)
+    item, group = np.where(mask)
+    for idx, num in enumerate(group):
+        clusters[num].append(int(item[idx]))
+    return sims, clusters
 
 
 def create_cluster(embed_list, num_clusters=10):
@@ -110,6 +155,9 @@ def create_cluster(embed_list, num_clusters=10):
     else:
         arr = arr.astype(np.float64, copy=False)
 
+    # Reduce dimensions for clustering
+    # arr = reduce_dimensions(arr, n_components=50)
+
     # create random cluster centroid for first iteration
     centroids_idx, centroids = kmeans_plus_plus_init(
         arr, num_clusters, random_state=42, return_indices=True
@@ -117,19 +165,37 @@ def create_cluster(embed_list, num_clusters=10):
     average_cent_dist_change = np.inf
     groups = [[] for _ in range(num_clusters)]
     min_dist = 1e-6
+
+    clusters = setup_clusters(centroids, arr, groups)
     # while average_cent_dist_change > min_dist:
     # assign points to nearest centroid
-    arr_norm = normalize_rows(arr)
-    sims = arr_norm @ centroids.T  # cosine similarity
-    max_sim_indices = np.argmax(sims, axis=1)
-    max_sim = np.max(sims, axis=1).reshape(-1, 1)
-    margin = 0.10
-    mask = sims >= (max_sim - margin)
-    item, group = np.where(mask)
-    for idx, num in enumerate(group):
-        groups[num].append(int(item[idx]))
-    clusters = [
-        np.mean(arr_norm[grp], axis=0) for grp in groups
-    ]  # these clusters aren't normalized?
+    # clusters = [
+    #     np.mean(arr_norm[grp], axis=0) for grp in groups
+    # ]  # these clusters aren't normalized?
 
-    return groups, clusters
+    return clusters
+
+
+def spectral_clusters(embeddings, n_clusters=10, random_state=42):
+    """
+    Create clusters using spectral clustering.
+
+    Parameters:
+        embeddings (list): The list of embedded vectors.
+        n_clusters (int): The number of clusters.
+
+    Returns:
+        labels (np.ndarray): The cluster labels for each embedding.
+    """
+
+    embeddings = reduce_dimensions(embeddings, n_components=50)
+
+    X = np.asarray(embeddings, dtype=np.float64)
+    spectral = SpectralClustering(
+        n_clusters=n_clusters,
+        affinity="nearest_neighbors",
+        assign_labels="kmeans",
+        random_state=random_state,
+    )
+    labels = spectral.fit_predict(X)
+    return labels
