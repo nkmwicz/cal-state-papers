@@ -125,29 +125,73 @@ def setup_clusters(centroids, embeds, clusters):
         embeds (np.ndarray): The embedded vectors.
         clusters (list[list]): The list of clusters to populate. A list for each cluster.
     Returns:
-
+        embed_clust (list[int]): The list of clusters (0-k clusters) for each embed. Align to embeds.
+        centroids (np.ndarray): The final centroids after clustering.
     """
     centroids_list = centroids
     centroids = centroids_list[-1]
-    print("centroids", centroids.shape, centroids)
-    arr_norm = normalize_rows(embeds)
-    sims = arr_norm @ centroids.T  # cosine similarity
+    X = embeds.astype(np.float64, copy=False)
+    Xn = normalize_rows(X)
+    C = centroids.astype(np.float64, copy=False)
+    sims = Xn @ C.T  # cosine similarity
     # max_sim_indices = np.argmax(sims, axis=1)
-    max_sim = np.max(sims, axis=1).reshape(-1, 1)
-    margin = 0.10
-    mask = sims >= (max_sim - margin)
-    item, group = np.where(mask)
-    for idx, num in enumerate(group):
-        clusters[num].append(int(item[idx]))
+    # best_sim = np.max(sims, axis=1).reshape(-1, 1)
+    best_sim = np.argmax(sims, axis=1)
 
-    new_centers = [np.mean(arr_norm[grp], axis=0) for grp in clusters]
+    # margin = 0.10
+    # soft_mask = sims >= (best_sim - margin)
+    # item, group = np.where(soft_mask)
+    for idx, num in enumerate(best_sim):
+        clusters[num].append(int(idx))
+    # for idx, num in enumerate(groujp):
+    # clusters[num].append(int(item[idx]))
+
+    new_centers = np.array([np.mean(Xn[grp], axis=0) for grp in clusters])
+
     centroids_list.append(new_centers)
+
     last_two = centroids_list[-2:]
+
     threshold = 1e-4
-    if np.linalg.norm(last_two[0] - last_two[1]) < threshold:
-        return sims, clusters
+    last_centroid = last_two[0]
+    this_centroid = last_two[1]
+
+    change_norm = np.linalg.norm(last_centroid - this_centroid)
+
+    if change_norm < threshold:
+        embed_clust = [0 for n in range(embeds.shape[0])]
+        for idx, cluster in enumerate(clusters):
+            for clus in cluster:
+                embed_clust[clus] = idx
+        return embed_clust, this_centroid
     else:
-        return setup_clusters(centroids_list, arr_norm, clusters)
+        reset_clusters = [[] for _ in range(len(centroids))]
+        return setup_clusters(centroids_list, Xn, reset_clusters)
+
+
+def return_representative_samples(embeds, clusters, centroids):
+    """
+    Returns the 10 most representative samples from each cluster based on cosine similarity to the cluster centroid.
+
+    Parameters:
+        embeds (np.ndarray): The embedded vectors.
+        clusters (list[int]): The list of clusters (0-k clusters) for each embed. Align to embeds.
+        centroids (list[np.ndarray]): The centroid of each cluster.
+
+    Returns:
+        Representative samples (list[list[int]]): A list of lists containing the indices of the 10 most representative samples for each cluster.
+    """
+    representat_samples = []
+    X = embeds.astype(np.float64, copy=False)
+    Xn = normalize_rows(X)
+    C = np.array(centroids).astype(np.float64, copy=False)
+    sims = Xn @ C.T  # cosine similarity
+    for cluster_idx in range(len(centroids)):
+        cluster_indices = [i for i, c in enumerate(clusters) if c == cluster_idx]
+        cluster_sims = sims[cluster_indices, cluster_idx]
+        top_indices = np.argsort(cluster_sims)[-10:][::-1]  # Top 10 indices
+        representat_samples.append([cluster_indices[i] for i in top_indices])
+    return representat_samples
 
 
 def create_cluster(embed_list, num_clusters=10):
@@ -178,14 +222,15 @@ def create_cluster(embed_list, num_clusters=10):
     groups = [[] for _ in range(num_clusters)]
     min_dist = 1e-6
 
-    clusters = setup_clusters(centroids, arr, groups)
+    clusters, new_centroids = setup_clusters(centroids, arr, groups)
+    representative_samples = return_representative_samples(arr, clusters, new_centroids)
     # while average_cent_dist_change > min_dist:
     # assign points to nearest centroid
     # clusters = [
     #     np.mean(arr_norm[grp], axis=0) for grp in groups
     # ]  # these clusters aren't normalized?
 
-    return clusters
+    return clusters, representative_samples
 
 
 def spectral_clusters(embeddings, n_clusters=10, random_state=42):
