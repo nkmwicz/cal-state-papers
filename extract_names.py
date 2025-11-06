@@ -108,7 +108,7 @@ def get_db_places() -> list[str]:
     driver = GraphDatabase.driver(uri, auth=(user, password))
 
     with driver.session() as session:
-        result = session.run("""MATCH (pl:Place) RETURN pl.name AS name""")
+        result = session.run("""MATCH (pl:Location) RETURN pl.name AS name""")
         places = [record["name"] for record in result]
 
     driver.close()
