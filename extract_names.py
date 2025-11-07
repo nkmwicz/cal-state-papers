@@ -4,7 +4,7 @@ import os
 from dotenv import load_dotenv
 from pydantic import BaseModel
 from neo4j import GraphDatabase
-from typing import TypedDict
+from typing import Tuple, TypedDict
 
 
 load_dotenv()
@@ -58,7 +58,7 @@ def config_gemini():
 
     grounding_tool = types.Tool(google_search=types.GoogleSearch())
     config = types.GenerateContentConfig(
-        tools=[grounding_tool],
+        # tools=[grounding_tool],
         system_instruction="You are an expert historian and researcher.",
         response_mime_type="application/json",
         response_schema=ResponseSchema,
@@ -116,19 +116,23 @@ def get_db_places() -> list[str]:
 
 
 def get_entities_from_text(
-    text_content: str, db_people: list[dict], db_places: list[str], client, config
-) -> dict:
+    text_content: str,
+    db_people: list[Person],
+    db_places: list[str],
+    client: genai.Client,
+    config: types.GenerateContentConfig,
+) -> Tuple[ResponseSchema, list]:
     """
     Uses the Gemini API to extract entities from text, prioritizing a known list of people.
 
     Args:
         text_content (str): The historical text to analyze.
-        db_people (list[dict]): A list of known people from the database.
+        db_people (list[People]): A list of known people from the database.
         client: The configured Gemini client.
         config: The generation configuration for the client.
 
     Returns:
-        dict: A dictionary containing the extracted entities, matching the ResponseSchema.
+        tuple: A tuple containing the extracted entities in a json object, matching the ResponseSchema, and a list of entities [auth, recp, auth_loc, recp_loc, people_ents, place_ents]
     """
     # Format the list of people for the prompt
     people_list_str = "\n".join(
@@ -148,17 +152,17 @@ def get_entities_from_text(
         ```
         If the author or recipient is in this list, use their information (name, birth year, death year) and set 'is_in_db' to true.
 
-    2.  **If you cannot find a confident match in the list**, use your external knowledge and search capabilities to identify the author and recipient and their life dates. In this case, set 'is_in_db' to false.
+    2.  **If you cannot find a confident match in the list**, use your best historical knowledge to identify the author and recipient and their life dates. For instance, if text indicates the title, who was the person holding that title during that date? In this case, set 'is_auth_in_db' or 'is_recp_in_db' to false.
     
     3. From the content of the text, determine the likely location associated with both the author and recipient. Use the following list of known places to assist you:
         ```
         {", ".join(db_places)}
         ```
-    If you cannot confidently identify a location from the list, use your external knowledge to infer it.
+    If you cannot confidently identify a location from the list, use your historical knowledge to infer it. Set 'is_authloc_in_db' or 'is_recploc_in_db' accordingly.
 
-    4.  Also, identify all other people and place names mentioned in the text following the same instructions as steps 1 and 2.
+    4.  Identify all other people and place names mentioned in the text following the same instructions as steps 1 and 2.
 
-    5.  If you cannot identify an author or recipient, use the value "Unknown". Use 0 for unknown years.
+    5.  If you cannot identify an author or recipient, use the value included within the text you are trying to identify. Use 0 for unknown years.
 
     **Analyze the following text**:
     "{text_content}"
@@ -167,8 +171,19 @@ def get_entities_from_text(
     """
 
     try:
-        response = client.generate_content(prompt, generation_config=config)
-        return response.json()
+        response = client.models.generate_content(
+            model="gemini-2.5-flash", contents=prompt, config=config
+        )
+        json_text = response.text
+        res_json = ResponseSchema.model_validate_json(json_text)
+        auth = res_json.author
+        recp = res_json.recipient
+        auth_loc = res_json.auth_location
+        recp_loc = res_json.recp_location
+        people_ents = res_json.people_entities
+        place_ents = res_json.place_entities
+        res_list = [auth, recp, auth_loc, recp_loc, people_ents, place_ents]
+        return res_json, res_list
     except Exception as e:
         print(f"An error occurred: {e}")
         return {"error": str(e)}
@@ -267,7 +282,7 @@ def update_place_entities(
         and new_entity.recp_location not in place_entities
     ):
         place_entities.append(new_entity.recp_location)
-    for place in new_entity.place_entitiies:
+    for place in new_entity.place_entities:
         if place not in place_entities:
             place_entities.append(place)
     return place_entities
