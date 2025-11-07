@@ -1,3 +1,4 @@
+from unittest.mock import Base
 from google import genai
 from google.genai import types
 import os
@@ -286,3 +287,40 @@ def update_place_entities(
         if place not in place_entities:
             place_entities.append(place)
     return place_entities
+
+
+import pandas as pd
+
+
+def tag_clusters(client: genai.Client, cluster_text: list[pd.Series]) -> list[str]:
+    """
+    Returns a list of tags for each cluster of texts .
+
+    Parameters:
+        client (genai.Client): The configured Gemini client.
+        cluster_text (list[list[str]]): A list of clusters, each containing a list of text strings.
+    Returns:
+        list[str]: A list of tags corresponding to each cluster.
+    """
+    tags = []
+    for idx, texts in enumerate(cluster_text):
+        combined_text = [f"Document {i+1}: {text}" for i, text in enumerate(texts)]
+        combined_text = "\n".join(combined_text)
+        prompt = f"""
+        You are an expert historian and researcher analyzing a set of historical documents. These documents are representative of a cluster of related texts.
+        Your task is to provide 3-5 concise tag words or short phrases that best describe the common themes, topics, or subjects represented in this cluster of documents.
+        Analyze the following documents:
+        "{combined_text}"
+        Return your findings as a comma-separated list of tags.
+        """
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash", contents=prompt
+            )
+            tag_text = response.text
+            tags.append(tag_text)
+            print(f"Cluster {idx} tagged successfully.")
+        except Exception as e:
+            print(f"An error occurred while tagging cluster {idx}: {e}")
+            tags.append("Error")
+    return tags
