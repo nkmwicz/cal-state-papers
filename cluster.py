@@ -116,7 +116,9 @@ def kmeans_plus_plus_init(
 
 
 # def assign_similarities()
-def setup_clusters(centroids, embeds, clusters):
+def setup_clusters(
+    centroids: np.ndarray, embeds: np.ndarray, clusters: list[list[int]]
+) -> tuple[list[int], np.ndarray]:
     """
     Sets embeds into clusters based on cosine similarity to centroids.
 
@@ -135,19 +137,54 @@ def setup_clusters(centroids, embeds, clusters):
     C = centroids.astype(np.float64, copy=False)
     sims = Xn @ C.T  # cosine similarity
     # max_sim_indices = np.argmax(sims, axis=1)
-    # best_sim = np.max(sims, axis=1).reshape(-1, 1)
-    best_sim = np.argmax(sims, axis=1)
+    best_sim = np.max(sims, axis=1).reshape(-1, 1)  # gets values
+    # best_sim = np.argmax(sims, axis=1) # gets indices
 
-    # margin = 0.10
-    # soft_mask = sims >= (best_sim - margin)
-    # item, group = np.where(soft_mask)
-    for idx, num in enumerate(best_sim):
-        clusters[num].append(int(idx))
-    # for idx, num in enumerate(groujp):
-    # clusters[num].append(int(item[idx]))
+    margin = 0.10
+    soft_mask = sims >= (best_sim - margin)
+    item, group = np.where(soft_mask)
+    for idx, num in enumerate(group):
+        clusters[num].append(int(item[idx]))
+    # for idx, num in enumerate(best_sim):
+    # clusters[num].append(int(idx))
 
-    new_centers = np.array([np.mean(Xn[grp], axis=0) for grp in clusters])
+    exclusive_clusters: list[list[int]] = []
+    for idx, cluster in enumerate(clusters):
+        clust_set = set(cluster)
+        other_clust_sets = [set(clusters[i]) for i in range(len(clusters)) if i != idx]
+        exclusive_clust = clust_set - set().union(*other_clust_sets)
+        exclusive_clusters.append(list(exclusive_clust))
 
+    new_centers: list[np.ndarray] = []
+    # new_centers = np.array([np.mean(Xn[grp], axis=0) for grp in exclusive_clusters])
+    new_centers: list[np.ndarray] = []
+    for idx, (exclusive_grp, all_grp) in enumerate(zip(exclusive_clusters, clusters)):
+        if len(exclusive_grp) > 0:
+            new_centers.append(np.mean(Xn[exclusive_grp], axis=0))
+        else:
+            # Find the point in this cluster that is least similar to other clusters
+            other_cluster_points = []
+            for jdx, other_grp in enumerate(clusters):
+                if jdx != idx:
+                    other_cluster_points.extend(other_grp)
+
+            if len(other_cluster_points) > 0 and len(all_grp) > 0:
+                # Compute similarity of each point in this cluster to other clusters
+                cluster_points = Xn[all_grp]
+                other_points = Xn[other_cluster_points]
+
+                # Average similarity to other cluster points
+                cross_sims = cluster_points @ other_points.T
+                avg_cross_sim = np.mean(cross_sims, axis=1)
+
+                # Choose point with lowest avg similarity to other clusters
+                most_distinctive_local_idx = np.argmin(avg_cross_sim)
+                most_distinctive_global_idx = all_grp[most_distinctive_local_idx]
+                new_centers.append(Xn[most_distinctive_global_idx])
+            else:
+                # Last resort: keep current centroid
+                new_centers.append(C[idx])
+    centroids_list = list(centroids_list)
     centroids_list.append(new_centers)
 
     last_two = centroids_list[-2:]
@@ -166,6 +203,7 @@ def setup_clusters(centroids, embeds, clusters):
         return embed_clust, this_centroid
     else:
         reset_clusters = [[] for _ in range(len(centroids))]
+        centroids_list = np.array(centroids_list)
         return setup_clusters(centroids_list, Xn, reset_clusters)
 
 
