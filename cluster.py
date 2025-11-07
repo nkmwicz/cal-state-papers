@@ -120,9 +120,10 @@ def setup_clusters(
     centroids: np.ndarray,
     embeds: np.ndarray,
     clusters: list[list[int]],
-    soft_percent: float = 0.1,
+    soft_margin: float = 0.1,
     soft_assign: bool = True,
-) -> tuple[list[int], np.ndarray]:
+    iter: int = 0,
+) -> tuple[list[int], np.ndarray, int]:
     """
     Sets embeds into clusters based on cosine similarity to centroids.
 
@@ -130,9 +131,12 @@ def setup_clusters(
         centroids (np.ndarray): The cluster centroids.
         embeds (np.ndarray): The embedded vectors.
         clusters (list[list]): The list of clusters to populate. A list for each cluster.
+        soft_margin (float): The margin for soft assignment.
+        soft_assign (bool): Whether to use soft assignment or hard assignment.
     Returns:
         embed_clust (list[int]): The list of clusters (0-k clusters) for each embed. Align to embeds.
         centroids (np.ndarray): The final centroids after clustering.
+        iter (int): The number of iterations taken to converge.
     """
     centroids_list = centroids
     centroids = centroids_list[-1]
@@ -145,7 +149,10 @@ def setup_clusters(
     if soft_assign:
         best_sim = np.max(sims, axis=1).reshape(-1, 1)  # gets values
         # soft assignment within margin
-        margin = 0.10
+        sim_diffs = np.diff(np.sort(sims, axis=1), axis=1)
+        marg_num = (1 - soft_margin) * 100
+        print(marg_num)
+        margin = np.percentile(sim_diffs, marg_num)
         soft_mask = sims >= (best_sim - margin)
         item, group = np.where(soft_mask)
         for idx, num in enumerate(group):
@@ -202,22 +209,30 @@ def setup_clusters(
 
     last_two = centroids_list[-2:]
 
-    threshold = 1e-4
+    threshold = 1e-12
     last_centroid = last_two[0]
     this_centroid = last_two[1]
 
     change_norm = np.linalg.norm(last_centroid - this_centroid)
 
-    if change_norm < threshold:
+    if iter == 100 or change_norm < threshold:
         embed_clust = [0 for n in range(embeds.shape[0])]
         for idx, cluster in enumerate(clusters):
             for clus in cluster:
                 embed_clust[clus] = idx
-        return embed_clust, this_centroid
+        return embed_clust, this_centroid, iter
     else:
         reset_clusters = [[] for _ in range(len(centroids))]
         centroids_list = np.array(centroids_list)
-        return setup_clusters(centroids_list, Xn, reset_clusters)
+        iter += 1
+        return setup_clusters(
+            centroids_list,
+            Xn,
+            reset_clusters,
+            soft_assign=soft_assign,
+            soft_margin=soft_margin,
+            iter=iter,
+        )
 
 
 def return_representative_samples(embeds, clusters, centroids):
@@ -245,11 +260,15 @@ def return_representative_samples(embeds, clusters, centroids):
     return representat_samples
 
 
-def create_cluster(embed_list, num_clusters=10):
+def create_cluster(embed_list, num_clusters=10, soft_assign=True, soft_margin=0.1):
     """
     Create clusters from embedded
 
     Parameters:
+        embed_list (list): The list of embedded vectors.
+        num_clusters (int): The number of clusters.
+        soft_assign (bool): Whether to use soft assignment or hard assignment.
+        soft_margin (float): The margin for soft assignment.
 
     Returns:
         list: A list of clusters.
@@ -273,7 +292,9 @@ def create_cluster(embed_list, num_clusters=10):
     groups = [[] for _ in range(num_clusters)]
     min_dist = 1e-6
 
-    clusters, new_centroids = setup_clusters(centroids, arr, groups)
+    clusters, new_centroids, iters = setup_clusters(
+        centroids, arr, groups, soft_assign=soft_assign, soft_margin=soft_margin, iter=0
+    )
     representative_samples = return_representative_samples(arr, clusters, new_centroids)
     # while average_cent_dist_change > min_dist:
     # assign points to nearest centroid
@@ -281,7 +302,7 @@ def create_cluster(embed_list, num_clusters=10):
     #     np.mean(arr_norm[grp], axis=0) for grp in groups
     # ]  # these clusters aren't normalized?
 
-    return clusters, representative_samples
+    return clusters, representative_samples, iters
 
 
 def spectral_clusters(embeddings, n_clusters=10, random_state=42):
