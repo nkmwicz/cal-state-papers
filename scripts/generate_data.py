@@ -175,6 +175,11 @@ def clean_table(t: pl.DataFrame) -> pl.DataFrame:
             .otherwise(pl.col("text"))
         ).alias("combined_text")
     )
+    t = t.with_columns(
+        pl.col("combined_text")
+        .map_elements(lambda s: len(encoding.encode(s)))
+        .alias("token_length"),
+    )
     t = (
         t.with_columns(
             pl.struct(pl.all())
