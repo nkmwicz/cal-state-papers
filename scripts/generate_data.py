@@ -1,6 +1,11 @@
 import pandas as pd
 import polars as pl
-import polars.selectors as cs
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+import tiktoken
 
 # from cluster import embed_items, create_cluster
 import requests
@@ -41,14 +46,6 @@ def parse_historical_table(html_content, session=None):
     # df1["text"] = df1["text"].str.replace("\n", "")
 
     return df1
-
-
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-
-import tiktoken
 
 
 def word_len(s: str):
